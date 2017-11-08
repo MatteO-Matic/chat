@@ -1,9 +1,12 @@
 #include "Server.h"
-#include <memory>
+#include "Client.h"
+#include "Packet.h"
 #include <algorithm>
-#include <sstream>
 #include <cstring>
 #include <iostream>
+#include <memory>
+#include <netinet/in.h>
+#include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -53,18 +56,18 @@ Server::Server(const int port){
   }
   std::cout << "Begin listening." << std::endl;
 
-  //m_uidcounter = 100;
+  m_uidcounter = 100;
   //m_roomidcounter = 100;
 }
 
 void Server::run(){
   struct sockaddr_in cli_addr;
-  int cli_sock = 0;
+  int connfd = 0;
   //Spin to accept clients
   while (true) {
-    socklen_t clisize = sizeof(cli_sock);
-    cli_sock = accept(m_sock, (struct sockaddr*)&cli_addr, &clisize);
-    if (cli_sock < 0) {
+    socklen_t clisize = sizeof(connfd);
+    connfd = accept(m_sock, (struct sockaddr*)&cli_addr, &clisize);
+    if (connfd < 0) {
       close(m_sock);
       std::cerr << "Error on accepting socket: " << strerror(errno) << std::endl;
       continue;
@@ -72,18 +75,130 @@ void Server::run(){
     std::cout << "Accepted new connection!" << std::endl;
 
     //Create our client
-    //std::unique_ptr<client_t> cli = std::make_unique<client_t>();
-    //cli->uid = m_uidcounter;
-    //m_uidcounter++;
-    //cli->addr = cli_addr;
-    //cli->sock = cli_sock;
+    Client* new_client = new Client();
+    new_client->uid = m_uidcounter;
+    m_uidcounter++;
+    new_client->addr = cli_addr;
+    new_client->socket = connfd;
 
-    //clients.push_back(std::move(cli));
-    //std::thread client_thread(process_client, cli);
-    //client_thread.detach();
+    std::thread client_thread(process_client, new_client);
+    client_thread.detach();
   }
-  //close(m_sock);
-  //for(auto &c : clients){
-  //  close(c->sock);
-  //}
+  close(m_sock);
+  for(auto &c : m_clients){
+    close(c->socket);
+  }
+}
+
+void Server::process_client(void *void_client){
+  auto new_client =
+    std::unique_ptr<Client>(static_cast<Client*>(void_client));
+
+  Server* server = Server::getServer();
+  bool initial = true;
+
+  Packet packet;
+  ssize_t pResult;
+
+  //Spin for messages
+  while((pResult = server->read_packet(std::move(new_client), packet)) > 0){
+    //Client disconnected
+    if(pResult == 0){
+      //TODO
+      //server->disconnect_client(client);
+      return;
+    }
+
+    if(initial){
+      //expect first packet to be a namepacket
+      if(packet.type != 1){
+        //TODO
+        //server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "Expecting namepacket as initial");
+        continue;
+      }
+    }
+
+    //TODO msgtype enum
+    switch(packet.type){
+      case 0: //Normal message to room
+        {
+          break;
+        }
+      case 1: //Change name
+        {
+          break;
+        }
+      case 2: //Whisper
+        {
+          break;
+        }
+      case 3: //join
+        {
+          break;
+        }
+      default:
+        {
+          std::cout << "Unknown messagetype: " << packet.type << std::endl;
+          break;
+        }
+    }
+  }
+
+  if(pResult < 0){
+    std::cerr << std::string("Couldn't read packet") + strerror(errno) << std::endl;
+  }
+  //Close the socket and remove client
+  //server->disconnect_client(client);
+}
+
+ssize_t Server::read_packet(std::unique_ptr<Client> client, Packet packet){
+  //Read in the packet header
+  //blocking, just to make sure we don't split the header
+  ssize_t hresult = recv(client->socket, &packet, packet.get_header_size(), MSG_WAITALL);
+
+  if (hresult <= 0) {
+    if(hresult < 0){
+      std::cerr << "Failed to read header from socket: " << strerror(errno) << std::endl;
+    }
+    disconnect_client(std::move(client));
+    return hresult;
+  }
+
+  //Check max characters
+  if(packet.length > MAX_CHARACTERS){
+    std::cout << "Incorrect header length" << std::endl;
+    disconnect_client(std::move(client));
+    return -1;
+  }
+
+  //Get the payload
+  std::string rbuf(packet.length, 0);
+  ssize_t presult = 0;
+
+  //read the full packet
+  ssize_t datalen = 0;
+  while(datalen < packet.length){
+    presult = read(client->socket, &rbuf[datalen], rbuf.size() - 1);
+    if (presult < 0) {
+      std::cerr << "Failed to read data from socket: " << strerror(errno) << std::endl;
+      disconnect_client(std::move(client));
+      return presult;
+    }
+    datalen += presult;
+  }
+  packet.payload = rbuf;
+  //std::cout << packet.payload << std::endl;
+
+  return datalen;
+}
+
+void Server::disconnect_client(std::unique_ptr<Client> client){
+  close(client->socket);
+  //remove client from connected rooms
+
+  auto it = std::find(m_clients.begin(), m_clients.end(), client);
+  if (it != m_clients.end()){
+    m_clients.erase(it);
+  }
+  //std::cout << "Disconnected: " << client->name << std::endl;
 }
