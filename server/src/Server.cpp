@@ -20,6 +20,10 @@ const int DEFAULT_PORT = 3333;
 const int MAX_CHARACTERS = 512;
 const int MAX_NAMECHARACTERS = 32;
 
+const std::string SERVERNAME = "Server";
+const std::string MESSAGE_SEPERATOR = "> ";
+const std::string MESSAGE_ROOM_SEPERATOR = "#";
+
 Server* Server::m_self = nullptr;
 Server* Server::getServer(){
   if(m_self == nullptr)
@@ -66,7 +70,6 @@ void Server::run(){
     socklen_t clisize = sizeof(connfd);
     connfd = accept(m_sock, (struct sockaddr*)&cli_addr, &clisize);
     if (connfd < 0) {
-      close(m_sock);
       std::cerr << "Error on accepting socket: " << strerror(errno) << std::endl;
       continue;
     }
@@ -89,7 +92,7 @@ void Server::run(){
 }
 
 
-ssize_t Server::sendmessage(std::unique_ptr<Client> receiver, std::string user_message){
+ssize_t Server::sendmessage(std::shared_ptr<Client> receiver, std::string user_message){
   //TODO sendmessage to offline clients?
 
   Packet packet;
@@ -102,7 +105,7 @@ ssize_t Server::sendmessage(std::unique_ptr<Client> receiver, std::string user_m
     disconnect_client(receiver);
     return result;
   }
-  result = write(receiver->sock, user_message.c_str(), user_message.size());
+  result = write(receiver->socket, user_message.c_str(), user_message.size());
   if(result < 0){
     std::cerr << "Error writing to socket" << strerror(errno) << std::endl;
     disconnect_client(receiver);
@@ -112,17 +115,17 @@ ssize_t Server::sendmessage(std::unique_ptr<Client> receiver, std::string user_m
 }
 
 void Server::process_client(void *void_client){
-  auto new_client =
-    std::unique_ptr<Client>(static_cast<Client*>(void_client));
+  auto client = std::shared_ptr<Client>(static_cast<Client*>(void_client));
 
   Server* server = Server::getServer();
+  server->m_clients.push_back(client);
   bool initial = true;
 
   Packet packet;
   ssize_t pResult;
 
   //Spin for messages
-  while((pResult = server->read_packet(std::move(new_client), packet)) > 0){
+  while((pResult = server->read_packet(client, packet)) > 0){
     //Client disconnected
     if(pResult == 0){
       server->disconnect_client(client);
@@ -132,7 +135,6 @@ void Server::process_client(void *void_client){
     if(initial){
       //expect first packet to be a namepacket
       if(packet.type != 1){
-        //TODO
         server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "Expecting namepacket as initial");
         continue;
       }
@@ -171,7 +173,7 @@ void Server::process_client(void *void_client){
   //server->disconnect_client(client);
 }
 
-ssize_t Server::read_packet(std::unique_ptr<Client> client, Packet packet){
+ssize_t Server::read_packet(std::shared_ptr<Client> client, Packet packet){
   //Read in the packet header
   //blocking, just to make sure we don't split the header
   ssize_t hresult = recv(client->socket, &packet, packet.get_header_size(), MSG_WAITALL);
@@ -180,14 +182,14 @@ ssize_t Server::read_packet(std::unique_ptr<Client> client, Packet packet){
     if(hresult < 0){
       std::cerr << "Failed to read header from socket: " << strerror(errno) << std::endl;
     }
-    disconnect_client(std::move(client));
+    disconnect_client(client);
     return hresult;
   }
 
   //Check max characters
   if(packet.length > MAX_CHARACTERS){
     std::cout << "Incorrect header length" << std::endl;
-    disconnect_client(std::move(client));
+    disconnect_client(client);
     return -1;
   }
 
@@ -201,7 +203,7 @@ ssize_t Server::read_packet(std::unique_ptr<Client> client, Packet packet){
     presult = read(client->socket, &rbuf[datalen], rbuf.size() - 1);
     if (presult < 0) {
       std::cerr << "Failed to read data from socket: " << strerror(errno) << std::endl;
-      disconnect_client(std::move(client));
+      disconnect_client(client);
       return presult;
     }
     datalen += presult;
@@ -212,7 +214,7 @@ ssize_t Server::read_packet(std::unique_ptr<Client> client, Packet packet){
   return datalen;
 }
 
-void Server::disconnect_client(std::unique_ptr<Client> client){
+void Server::disconnect_client(std::shared_ptr<Client> client){
   close(client->socket);
   //remove client from connected rooms
 
