@@ -14,8 +14,6 @@
 #include <unistd.h>
 #include <vector>
 
-using namespace std;
-
 const int MAX_ROOMCHARACTERS = 16;
 const int MAX_CLIENTS = 10;
 const int DEFAULT_PORT = 3333;
@@ -90,6 +88,29 @@ void Server::run(){
   }
 }
 
+
+ssize_t Server::sendmessage(std::unique_ptr<Client> receiver, std::string user_message){
+  //TODO sendmessage to offline clients?
+
+  Packet packet;
+  packet.length = user_message.size();
+  packet.type = 0;
+
+  ssize_t result = write(receiver->socket, &packet, packet.get_header_size());
+  if(result < 0){
+    std::cerr << "Error writing header to socket" << strerror(errno) << std::endl;
+    disconnect_client(receiver);
+    return result;
+  }
+  result = write(receiver->sock, user_message.c_str(), user_message.size());
+  if(result < 0){
+    std::cerr << "Error writing to socket" << strerror(errno) << std::endl;
+    disconnect_client(receiver);
+    return result;
+  }
+  return result;
+}
+
 void Server::process_client(void *void_client){
   auto new_client =
     std::unique_ptr<Client>(static_cast<Client*>(void_client));
@@ -104,8 +125,7 @@ void Server::process_client(void *void_client){
   while((pResult = server->read_packet(std::move(new_client), packet)) > 0){
     //Client disconnected
     if(pResult == 0){
-      //TODO
-      //server->disconnect_client(client);
+      server->disconnect_client(client);
       return;
     }
 
@@ -113,7 +133,7 @@ void Server::process_client(void *void_client){
       //expect first packet to be a namepacket
       if(packet.type != 1){
         //TODO
-        //server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "Expecting namepacket as initial");
+        server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "Expecting namepacket as initial");
         continue;
       }
     }
@@ -145,7 +165,7 @@ void Server::process_client(void *void_client){
   }
 
   if(pResult < 0){
-    std::cerr << std::string("Couldn't read packet") + strerror(errno) << std::endl;
+    std::cerr << std::string("Couldn't read packet: ") + strerror(errno) << std::endl;
   }
   //Close the socket and remove client
   //server->disconnect_client(client);

@@ -17,6 +17,8 @@ class Server
     ssize_t read_packet(std::unique_ptr<Client> client, Packet packet);
     static void process_client(void *void_client);
 
+    ssize_t sendmessage(std::unique_ptr<Client> receiver, std::string user_message);
+
   public:
     Server(const int port);
     static Server* getServer();
