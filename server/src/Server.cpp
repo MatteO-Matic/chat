@@ -1,6 +1,6 @@
 #include "Server.h"
 #include "Client.h"
-#include "Packet.h"
+#include "Room.h"
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -23,6 +23,12 @@ const int MAX_NAMECHARACTERS = 32;
 const std::string SERVERNAME = "Server";
 const std::string MESSAGE_SEPERATOR = "> ";
 const std::string MESSAGE_ROOM_SEPERATOR = "#";
+
+typedef struct{
+  unsigned int length;
+  int type;
+  std::string payload;
+} packet_t;
 
 Server* Server::m_self = nullptr;
 Server* Server::getServer(){
@@ -58,8 +64,8 @@ Server::Server(const int port){
   }
   std::cout << "Begin listening." << std::endl;
 
-  m_uidcounter = 100;
-  //m_roomidcounter = 100;
+  m_uid_counter = 100;
+  m_roomid_counter = 100;
 }
 
 void Server::run(){
@@ -77,8 +83,8 @@ void Server::run(){
 
     //Create our client
     Client* new_client = new Client();
-    new_client->uid = m_uidcounter;
-    m_uidcounter++;
+    new_client->uid = m_uid_counter;
+    m_uid_counter++;
     new_client->addr = cli_addr;
     new_client->socket = connfd;
 
@@ -95,11 +101,11 @@ void Server::run(){
 ssize_t Server::sendmessage(std::shared_ptr<Client> receiver, std::string user_message){
   //TODO sendmessage to offline clients?
 
-  Packet packet;
+  packet_t packet;
   packet.length = user_message.size();
   packet.type = 0;
 
-  ssize_t result = write(receiver->socket, &packet, packet.get_header_size());
+  ssize_t result = write(receiver->socket, &packet, sizeof(packet) - sizeof(std::string));
   if(result < 0){
     std::cerr << "Error writing header to socket" << strerror(errno) << std::endl;
     disconnect_client(receiver);
@@ -117,16 +123,17 @@ ssize_t Server::sendmessage(std::shared_ptr<Client> receiver, std::string user_m
 void Server::process_client(void *void_client){
   auto client = std::shared_ptr<Client>(static_cast<Client*>(void_client));
 
+  //TODO unique?
   Server* server = Server::getServer();
   server->m_clients.push_back(client);
   bool initial = true;
 
-  Packet packet;
+  packet_t packet;
   ssize_t pResult;
 
   //Spin for messages
   while((pResult = server->read_packet(client, packet)) > 0){
-    //Client disconnected
+    std::cout << packet.type << std::endl;
     if(pResult == 0){
       server->disconnect_client(client);
       return;
@@ -148,6 +155,9 @@ void Server::process_client(void *void_client){
         }
       case 1: //Change name
         {
+          client->name = packet.payload;
+          initial = false;
+          std::cout << "Connected: "<< client->name << std::endl;
           break;
         }
       case 2: //Whisper
@@ -156,6 +166,7 @@ void Server::process_client(void *void_client){
         }
       case 3: //join
         {
+          server->create_room(client, packet.payload);
           break;
         }
       default:
@@ -168,15 +179,30 @@ void Server::process_client(void *void_client){
 
   if(pResult < 0){
     std::cerr << std::string("Couldn't read packet: ") + strerror(errno) << std::endl;
+    //Close the socket and remove client
+    //server->disconnect_client(client);
   }
-  //Close the socket and remove client
-  //server->disconnect_client(client);
+}
+//Create a new room and join it with sender client
+void Server::create_room(std::shared_ptr<Client> sender, std::string room_name){
+  std::shared_ptr<Room> new_room = std::make_shared<Room>();
+  new_room->name = room_name;
+
+  new_room->roomid = m_roomid_counter;
+
+  new_room->clients.push_back(sender);
+  sender->rooms.push_back(new_room);
+  //TODO lock counter
+  m_roomid_counter++;
+  m_rooms.push_back(new_room);
+  std::cout << "room created: " << new_room->name << std::endl;
 }
 
-ssize_t Server::read_packet(std::shared_ptr<Client> client, Packet packet){
+ssize_t Server::read_packet(std::shared_ptr<Client> client, packet_t& packet){
   //Read in the packet header
   //blocking, just to make sure we don't split the header
-  ssize_t hresult = recv(client->socket, &packet, packet.get_header_size(), MSG_WAITALL);
+  //std::string: payload
+  ssize_t hresult = recv(client->socket, &packet, sizeof(packet) - sizeof(std::string), MSG_WAITALL);
 
   if (hresult <= 0) {
     if(hresult < 0){
@@ -185,6 +211,7 @@ ssize_t Server::read_packet(std::shared_ptr<Client> client, Packet packet){
     disconnect_client(client);
     return hresult;
   }
+  std::cout << "head: " << packet.length << " : " << packet.type << std::endl;
 
   //Check max characters
   if(packet.length > MAX_CHARACTERS){
@@ -209,8 +236,6 @@ ssize_t Server::read_packet(std::shared_ptr<Client> client, Packet packet){
     datalen += presult;
   }
   packet.payload = rbuf;
-  //std::cout << packet.payload << std::endl;
-
   return datalen;
 }
 
