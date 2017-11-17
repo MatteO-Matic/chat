@@ -182,7 +182,24 @@ void Server::process_client(void *void_client){
         }
       case 3: //join
         {
-          server->create_room(client, packet.payload);
+          //Only accept names with numbers/alpha and don't extend max characters
+          if(packet.payload.length() > MAX_ROOMCHARACTERS){
+            server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "Invalid name, extends max characters");
+            break;
+          }
+          for(auto &c : packet.payload){
+            if(isalnum(c) == 0){
+              server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "Invalid name, only letters and numbers allowed");
+              return;
+            }
+          }
+          std::string room_name = packet.payload;
+
+          //join room if it exists otherwise create a new one
+          if(server->join_room(client, room_name) == -1){
+            //Create new room if it didn't exist
+            server->create_room(client, room_name);
+          }
           break;
         }
       default:
@@ -265,4 +282,29 @@ void Server::disconnect_client(std::shared_ptr<Client> client){
     m_clients.erase(it);
   }
   DEBUG("Disconnected: ") << client->name << std::endl;
+}
+
+//-1 Room don't exist
+int Server::join_room(std::shared_ptr<Client> sender, std::string room_name){
+  //Find the room with the name
+  auto it = std::find_if(m_rooms.begin(), m_rooms.end(),
+      [&](auto lroom) { return lroom->name == room_name; });
+  return join_room(sender, it);
+}
+
+//Join by iterator
+//-1 Room don't exist
+int Server::join_room(std::shared_ptr<Client> sender, std::vector<std::shared_ptr<Room>>::iterator it){
+  if(it != m_rooms.end()){
+    //Make sure sure client isn't already in the room
+    if(std::find((*it)->clients.begin(), (*it)->clients.end(), sender) == (*it)->clients.end()){
+      (*it)->clients.push_back(sender);
+      sender->rooms.push_back((*it));
+      DEBUG("Client (") << sender->name << ") joined room " << (*it)->name << std::endl;
+    }else{
+      sendmessage(sender, SERVERNAME + MESSAGE_SEPERATOR + "Already connected to: " + (*it)->name);
+    }
+    return 0;
+  }
+  return -1;
 }

@@ -22,6 +22,8 @@ class Server
     } packet_t;
 
     void create_room(std::shared_ptr<Client> sender, std::string room_name);
+    int join_room(std::shared_ptr<Client> sender, std::string room_name);
+    int join_room(std::shared_ptr<Client> sender, std::vector<std::shared_ptr<Room>>::iterator it);
 
     void disconnect_client(std::shared_ptr<Client> client);
     ssize_t read_packet(std::shared_ptr<Client> client, packet_t& packet);
