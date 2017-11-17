@@ -6,7 +6,7 @@
 #include <vector>
 #include <memory>
 
-class Client {
+class Client : public std::enable_shared_from_this<Client> {
   public:
     Client();
     unsigned int uid;
@@ -14,5 +14,6 @@ class Client {
     struct sockaddr_in addr;
     std::string name;
     std::vector<std::shared_ptr<Room>> rooms;
+    void remove_from_all_rooms();
 };
 #endif

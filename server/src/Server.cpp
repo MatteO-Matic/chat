@@ -1,6 +1,7 @@
-#include "Server.h"
 #include "Client.h"
+#include "Logger.h"
 #include "Room.h"
+#include "Server.h"
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -79,7 +80,7 @@ void Server::run(){
       std::cerr << "Error on accepting socket: " << strerror(errno) << std::endl;
       continue;
     }
-    std::cout << "Accepted new connection!" << std::endl;
+    DEBUG("Accepted new connection!") << std::endl;
 
     //Create our client
     Client* new_client = new Client();
@@ -133,7 +134,6 @@ void Server::process_client(void *void_client){
 
   //Spin for messages
   while((pResult = server->read_packet(client, packet)) > 0){
-    std::cout << packet.type << std::endl;
     if(pResult == 0){
       server->disconnect_client(client);
       return;
@@ -157,7 +157,7 @@ void Server::process_client(void *void_client){
         {
           client->name = packet.payload;
           initial = false;
-          std::cout << "Connected: "<< client->name << std::endl;
+          DEBUG("Connected: ") << client->name << std::endl;
           break;
         }
       case 2: //Whisper
@@ -171,7 +171,7 @@ void Server::process_client(void *void_client){
         }
       default:
         {
-          std::cout << "Unknown messagetype: " << packet.type << std::endl;
+          DEBUG("Unknown messagetype: ") << packet.type << std::endl;
           break;
         }
     }
@@ -195,7 +195,7 @@ void Server::create_room(std::shared_ptr<Client> sender, std::string room_name){
   //TODO lock counter
   m_roomid_counter++;
   m_rooms.push_back(new_room);
-  std::cout << "room created: " << new_room->name << std::endl;
+  DEBUG("Room created: ") << new_room->name << std::endl;
 }
 
 ssize_t Server::read_packet(std::shared_ptr<Client> client, packet_t& packet){
@@ -211,11 +211,10 @@ ssize_t Server::read_packet(std::shared_ptr<Client> client, packet_t& packet){
     disconnect_client(client);
     return hresult;
   }
-  std::cout << "head: " << packet.length << " : " << packet.type << std::endl;
 
   //Check max characters
   if(packet.length > MAX_CHARACTERS){
-    std::cout << "Incorrect header length" << std::endl;
+    DEBUG("Incorrect header length") << std::endl;
     disconnect_client(client);
     return -1;
   }
@@ -242,10 +241,12 @@ ssize_t Server::read_packet(std::shared_ptr<Client> client, packet_t& packet){
 void Server::disconnect_client(std::shared_ptr<Client> client){
   close(client->socket);
   //remove client from connected rooms
+  client->remove_from_all_rooms();
 
+  //remove client from vector
   auto it = std::find(m_clients.begin(), m_clients.end(), client);
   if (it != m_clients.end()){
     m_clients.erase(it);
   }
-  //std::cout << "Disconnected: " << client->name << std::endl;
+  DEBUG("Disconnected: ") << client->name << std::endl;
 }
