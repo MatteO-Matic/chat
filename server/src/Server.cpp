@@ -155,9 +155,25 @@ void Server::process_client(void *void_client){
         }
       case 1: //Change name
         {
+          //Only accept names with numbers/alpha and don't extend max characters
+          if(packet.payload.length() > MAX_NAMECHARACTERS){
+            server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "Invalid name, extends max characters");
+            break;
+          }
+          for(auto &c : packet.payload){
+            if(isalnum(c) == 0){
+              server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "Invalid name, only letters and numbers allowed");
+              return;
+            }
+          }
+          //Got the name, now we can allow other packets
+          if(initial){
+            initial = false;
+          }
+
+          //set name
           client->name = packet.payload;
-          initial = false;
-          DEBUG("Connected: ") << client->name << std::endl;
+          DEBUG(client->uid) << " - nameset: " << client->name << std::endl;
           break;
         }
       case 2: //Whisper
