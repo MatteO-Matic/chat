@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 const int MAX_ROOMCHARACTERS = 16;
@@ -21,6 +22,7 @@ const int DEFAULT_PORT = 3333;
 const int MAX_CHARACTERS = 512;
 const int MAX_NAMECHARACTERS = 32;
 
+//TODO Don't include the seperators and name in the packet message
 const std::string SERVERNAME = "Server";
 const std::string MESSAGE_SEPERATOR = "> ";
 const std::string MESSAGE_ROOM_SEPERATOR = "#";
@@ -28,6 +30,7 @@ const std::string MESSAGE_ROOM_SEPERATOR = "#";
 typedef struct{
   unsigned int length;
   int type;
+  int uid;
   std::string payload;
 } packet_t;
 
@@ -101,7 +104,6 @@ void Server::run(){
 
 ssize_t Server::sendmessage(std::shared_ptr<Client> receiver, std::string user_message){
   //TODO sendmessage to offline clients?
-
   packet_t packet;
   packet.length = user_message.size();
   packet.type = 0;
@@ -151,6 +153,13 @@ void Server::process_client(void *void_client){
     switch(packet.type){
       case 0: //Normal message to room
         {
+          if(server->m_rooms.find(packet.uid) == server->m_rooms.end()){
+            server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "Room doesn't exist");
+          }
+
+          if(server->m_rooms[packet.uid]->sendmessage_to_room(client, packet.payload) == -1){
+            server->sendmessage(client, SERVERNAME + MESSAGE_SEPERATOR + "You arn't connected to: " + server->m_rooms[packet.uid]->name);
+          }
           break;
         }
       case 1: //Change name
@@ -227,7 +236,7 @@ void Server::create_room(std::shared_ptr<Client> sender, std::string room_name){
   sender->rooms.push_back(new_room);
   //TODO lock counter
   m_roomid_counter++;
-  m_rooms.push_back(new_room);
+  m_rooms[m_roomid_counter] = new_room;
   DEBUG("Room created: ") << new_room->name << std::endl;
 }
 
@@ -288,21 +297,21 @@ void Server::disconnect_client(std::shared_ptr<Client> client){
 int Server::join_room(std::shared_ptr<Client> sender, std::string room_name){
   //Find the room with the name
   auto it = std::find_if(m_rooms.begin(), m_rooms.end(),
-      [&](auto lroom) { return lroom->name == room_name; });
+      [&](auto lroom) { return lroom.second->name == room_name; });
   return join_room(sender, it);
 }
 
 //Join by iterator
 //-1 Room don't exist
-int Server::join_room(std::shared_ptr<Client> sender, std::vector<std::shared_ptr<Room>>::iterator it){
+int Server::join_room(std::shared_ptr<Client> sender, std::unordered_map<int, std::shared_ptr<Room>>::iterator it){
   if(it != m_rooms.end()){
     //Make sure sure client isn't already in the room
-    if(std::find((*it)->clients.begin(), (*it)->clients.end(), sender) == (*it)->clients.end()){
-      (*it)->clients.push_back(sender);
-      sender->rooms.push_back((*it));
-      DEBUG("Client (") << sender->name << ") joined room " << (*it)->name << std::endl;
+    if(std::find((*it).second->clients.begin(), (*it).second->clients.end(), sender) == (*it).second->clients.end()){
+      (*it).second->clients.push_back(sender);
+      sender->rooms.push_back((*it).second);
+      DEBUG("Client (") << sender->name << ") joined room " << (*it).second->name << std::endl;
     }else{
-      sendmessage(sender, SERVERNAME + MESSAGE_SEPERATOR + "Already connected to: " + (*it)->name);
+      sendmessage(sender, SERVERNAME + MESSAGE_SEPERATOR + "Already connected to: " + (*it).second->name);
     }
     return 0;
   }
